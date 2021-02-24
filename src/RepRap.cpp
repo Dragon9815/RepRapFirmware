@@ -928,11 +928,11 @@ void RepRap::EmergencyStop() noexcept
 	platform->StopLogging();
 }
 
-void RepRap::SetDebug(Module m, bool enable, uint32_t filter) noexcept
+void RepRap::SetDebug(Module m, uint32_t flags) noexcept
 {
 	if (m < numModules)
 	{
-		debugMaps[m].SetFromRaw(filter);
+		debugMaps[m].SetFromRaw(flags);
 	}
 }
 

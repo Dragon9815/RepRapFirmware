@@ -70,8 +70,8 @@ public:
 	void Timing(MessageType mtype) noexcept;
 
 	bool Debug(Module module) const noexcept;
-	const DebugFlags& GetDebugFlags(Module m) const noexcept;
-	void SetDebug(Module m, bool enable, uint32_t filter) noexcept;
+	DebugFlags GetDebugFlags(Module m) const noexcept;
+	void SetDebug(Module m, uint32_t flags) noexcept;
 	void ClearDebug() noexcept;
 	void PrintDebug(MessageType mt) noexcept;
 	Module GetSpinningModule() const noexcept;
@@ -306,7 +306,7 @@ private:
 extern RepRap reprap;
 
 inline bool RepRap::Debug(Module m) const noexcept { return debugMaps[m].IsNonEmpty(); }
-inline const DebugFlags& RepRap::GetDebugFlags(Module m) const noexcept { return debugMaps[m]; }
+inline DebugFlags RepRap::GetDebugFlags(Module m) const noexcept { return debugMaps[m]; }
 inline Module RepRap::GetSpinningModule() const noexcept { return spinningModule; }
 
 inline Tool* RepRap::GetCurrentTool() const noexcept { return currentTool; }

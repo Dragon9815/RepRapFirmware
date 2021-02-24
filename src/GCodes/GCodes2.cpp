@@ -1587,40 +1587,36 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 		case 111: // Debug level
 			{
 				bool seen = false;
-				uint32_t filter = 0;
-				bool dbv = false;
+				uint32_t flags = 0;
 				Module module = Module::noModule;
 				if (gb.Seen('S'))
 				{
-					filter = gb.GetUIValue();
-					dbv = filter != 0;
-					if (filter != 0)
+					flags = gb.GetUIValue();
+					if (flags != 0)
 					{
-						filter = 0xFFFFFFFF;
+						flags = 0xFFFFFFFF;
 					}
 					seen = true;
 				}
-				if (!seen && gb.Seen('D'))
+				else if (gb.Seen('D'))
 				{
-					filter = gb.GetUIValue();
-					dbv = filter > 0;
+					flags = gb.GetUIValue();
 					seen = true;
 				}
 				if (gb.Seen('P'))
 				{
-					uint32_t moduleParam = gb.GetLimitedUIValue('P', Module::numModules);
-					module = static_cast<Module>(moduleParam);
+					module = static_cast<Module>(gb.GetLimitedUIValue('P', Module::numModules));
 					seen = true;
 				}
 				if (seen)
 				{
 					if (module != Module::noModule)
 					{
-						reprap.SetDebug(module, dbv, filter);
+						reprap.SetDebug(module, flags);
 						reprap.PrintDebug(gb.GetResponseMessageType());
 						return true;
 					}
-					else if (dbv)
+					else if (flags != 0)
 					{
 						// Repetier Host sends M111 with various S parameters to enable echo and similar features, which used to turn on all out debugging.
 						// But it's not useful to enable all debugging anyway. So we no longer allow debugging to be enabled without a P parameter.
