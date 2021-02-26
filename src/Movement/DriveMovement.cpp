@@ -394,7 +394,8 @@ bool DriveMovement::PrepareExtruder(const DDA& dda, const PrepParams& params, fl
 	stepsTillRecalc = 0;							// so that we don't skip the calculation
 	state = (mp.cart.accelStopStep > 1) ? DMState::accel0
 				: (mp.cart.decelStartStep > 1) ? DMState::steady
-				  : DMState::decel0;
+					: (reverseStartStep > 1) ? DMState::decel0
+						: DMState::reversing;
 	isDelta = false;
 	return CalcNextStepTime(dda);
 }
@@ -503,6 +504,10 @@ bool DriveMovement::PrepareRemoteExtruder(const DDA& dda, const PrepParams& para
 	nextStepTime = 0;
 	stepInterval = 999999;							// initialise to a large value so that we will calculate the time for just one step
 	stepsTillRecalc = 0;							// so that we don't skip the calculation
+	state = (mp.cart.accelStopStep > 1) ? DMState::accel0
+				: (mp.cart.decelStartStep > 1) ? DMState::steady
+					: (reverseStartStep > 1) ? DMState::decel0
+						: DMState::reversing;
 	isDelta = false;
 	return CalcNextStepTime(dda);
 }
@@ -575,13 +580,15 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 	uint32_t nextCalcStepTime;
 	switch (state)
 	{
-	case DMState::accel0:
-		// acceleration phase
+	case DMState::accel0:	// acceleration phase
 		{
 			const uint32_t stepsToLimit = mp.cart.accelStopStep - nextStep;
 			if (stepsToLimit == 1)
 			{
-				state = DMState::steady;
+				// This is the last step in this phase
+				state = (mp.cart.decelStartStep > mp.cart.accelStopStep) ? DMState::steady
+						: (reverseStartStep > mp.cart.accelStopStep) ? DMState::decel0
+							: DMState::reversing;
 			}
 			else if (stepInterval < DDA::MinCalcIntervalCartesian)
 			{
@@ -598,6 +605,8 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 					shiftFactor = 1;		// double stepping
 				}
 			}
+
+			stepsTillRecalc = (1u << shiftFactor) - 1u;					// store number of additional steps to generate
 			const uint32_t nextCalcStep = nextStep + stepsTillRecalc;
 #if DM_USE_FPU
 			const float adjustedStartSpeedTimesCdivA = (float)(dda.afterPrepare.startSpeedTimesCdivA + mp.cart.compensationClocks);
@@ -609,13 +618,13 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 		}
 		break;
 
-	case DMState::steady:
-		// steady speed phase
+	case DMState::steady:	// steady speed phase
 		{
 			const uint32_t stepsToLimit = mp.cart.decelStartStep - nextStep;
 			if (stepsToLimit == 1)
 			{
-				state = DMState::decel0;
+				state = (reverseStartStep > mp.cart.decelStartStep) ? DMState::decel0
+							: DMState::reversing;
 			}
 			else if (stepInterval < DDA::MinCalcIntervalCartesian)
 			{
@@ -632,6 +641,8 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 					shiftFactor = 1;		// double stepping
 				}
 			}
+
+			stepsTillRecalc = (1u << shiftFactor) - 1u;					// store number of additional steps to generate
 			const uint32_t nextCalcStep = nextStep + stepsTillRecalc;
 			nextCalcStepTime =
 #if DM_USE_FPU
@@ -648,15 +659,12 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 		}
 		break;
 
-	case DMState::decel0:
-		// deceleration phase, not reversed yet
+	case DMState::decel0:	// deceleration phase, not reversed yet
 		{
 			const uint32_t stepsToLimit = reverseStartStep - nextStep;
 			if (stepsToLimit == 1)
 			{
-				direction = !direction;
-				directionChanged = true;
-				state = DMState::reverse;
+				state = DMState::reversing;
 			}
 			else if (stepInterval < DDA::MinCalcIntervalCartesian)
 			{
@@ -673,6 +681,8 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 					shiftFactor = 1;		// double stepping
 				}
 			}
+
+			stepsTillRecalc = (1u << shiftFactor) - 1u;					// store number of additional steps to generate
 			const uint32_t nextCalcStep = nextStep + stepsTillRecalc;
 			const uint32_t adjustedTopSpeedTimesCdivDPlusDecelStartClocks = dda.afterPrepare.topSpeedTimesCdivDPlusDecelStartClocks - mp.cart.compensationClocks;
 #if DM_USE_FPU
@@ -691,7 +701,12 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 		}
 		break;
 
-	case DMState::reverse:
+	case DMState::reversing:
+		direction = !direction;
+		directionChanged = true;
+		state = DMState::reverse;
+		// no break
+	case DMState::reverse:	// reverse phase
 		{
 			const uint32_t stepsToLimit = totalSteps + 1 - nextStep;
 			if (stepInterval < DDA::MinCalcIntervalCartesian)
@@ -709,6 +724,8 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 					shiftFactor = 1;		// double stepping
 				}
 			}
+
+			stepsTillRecalc = (1u << shiftFactor) - 1u;					// store number of additional steps to generate
 			const uint32_t nextCalcStep = nextStep + stepsTillRecalc;
 			const uint32_t adjustedTopSpeedTimesCdivDPlusDecelStartClocks = dda.afterPrepare.topSpeedTimesCdivDPlusDecelStartClocks - mp.cart.compensationClocks;
 			nextCalcStepTime = adjustedTopSpeedTimesCdivDPlusDecelStartClocks
@@ -723,8 +740,6 @@ pre(nextStep < totalSteps; stepsTillRecalc == 0)
 	default:
 		return false;
 	}
-
-	stepsTillRecalc = (1u << shiftFactor) - 1u;					// store number of additional steps to generate
 
 	// When crossing between movement phases with high microstepping, due to rounding errors the next step may appear to be due before the last one
 	stepInterval = (nextCalcStepTime > nextStepTime)

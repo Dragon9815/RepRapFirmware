@@ -2183,25 +2183,29 @@ bool GCodes::DoArcMove(GCodeBuffer& gb, bool clockwise, const char *& err)
 		const float dSquared = fsquare(deltaAxis0) + fsquare(deltaAxis1);	// square of the distance between start and end points
 
 		// The distance between start and end points must not be zero
-		constexpr const char *badArcParametersMessage = "G2/G3: radius is too small to reach endpoint";
 		if (dSquared == 0.0)
 		{
-			err = badArcParametersMessage;
+			err = "G2/G3: distance between start and end points must not be zero when specifying a radius";
 			return true;
 		}
 
 		// The perpendicular must have a real length (possibly zero)
 		const float hSquared = fsquare(rParam) - dSquared/4;				// square of the length of the perpendicular from the mid point to the arc centre
-		float hDivD = sqrtf(hSquared/dSquared);
-		if (hDivD < 0.0)
+
+		// When the arc is exactly 180deg, rounding error may make hSquared slightly negative instead of zero
+		float hDivD;
+		if (hSquared >= 0.0)
 		{
-			// When the arc is exactly 180deg, rounding error may make hDivD slightly negative instead of zero
-			if (hDivD < -0.001)
+			hDivD = sqrtf(hSquared/dSquared);
+		}
+		else
+		{
+			if (hSquared < -0.02 * fsquare(rParam))							// allow the radius to be up to 1% too short
 			{
-				err = badArcParametersMessage;
+				err = "G2/G3: radius is too small to reach endpoint";
 				return true;
 			}
-			hDivD = 0.0;													// this has the effect of increasing the radius slightly do that the maths works
+			hDivD = 0.0;													// this has the effect of increasing the radius slightly so that the maths works
 		}
 
 		// If hDivD is nonzero then there are two possible positions for the arc centre, giving a short arc (less than 180deg) or a long arc (more than 180deg).
@@ -3192,19 +3196,19 @@ void GCodes::StartPrinting(bool fromStart) noexcept
 // Function to handle dwell delays. Returns true for dwell finished, false otherwise.
 GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 {
-	int32_t dwell;
-	if (gb.Seen('S'))
+	// Wait for all the queued moves to stop. Only do this if motion has been commanded from this GCode stream since we last waited for motion to stop.
+	// This is so that G4 can be used in a trigger or daemon macro file without pausing motion, when the macro doesn't itself command any motion.
+	if (gb.WasMotionCommanded())
 	{
-		dwell = (int32_t)(gb.GetFValue() * 1000.0);		// S values are in seconds
+		if (!LockMovementAndWaitForStandstill(gb))
+		{
+			return GCodeResult::notFinished;
+		}
 	}
-	else if (gb.Seen('P'))
-	{
-		dwell = gb.GetIValue();							// P value are in milliseconds
-	}
-	else
-	{
-		return GCodeResult::ok;  // No time given - throw it away
-	}
+
+	const int32_t dwell = (gb.Seen('S')) ? (int32_t)(gb.GetFValue() * 1000.0)		// S values are in seconds
+							: (gb.Seen('P')) ? gb.GetIValue()						// P value are in milliseconds
+								: 0.0;
 
 	if (dwell <= 0)
 	{
@@ -3218,16 +3222,6 @@ GCodeResult GCodes::DoDwell(GCodeBuffer& gb) THROWS(GCodeException)
 		return reprap.GetRoland()->ProcessDwell(dwell);
 	}
 #endif
-
-	// Wait for all the queued moves to stop. Only do this if motion has been commanded from this GCode stream since we last waited for motion to stop.
-	// This is so that G4 can be used in a trigger or daemon macro file without pausing motion, when the macro doesn't itself command any motion.
-	if (gb.WasMotionCommanded())
-	{
-		if (!LockMovementAndWaitForStandstill(gb))
-		{
-			return GCodeResult::notFinished;
-		}
-	}
 
 	if (simulationMode != 0)
 	{
@@ -3383,7 +3377,7 @@ GCodeResult GCodes::ManageTool(GCodeBuffer& gb, const StringRef& reply)
 	String<ToolNameLength> name;
 	if (gb.Seen('S'))
 	{
-		gb.GetQuotedString(name.GetRef());
+		gb.GetReducedString(name.GetRef());
 		seen = true;
 	}
 
