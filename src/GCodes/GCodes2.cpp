@@ -2106,7 +2106,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 					}
 					else
 					{
-						reply.catf(" %.03f", (double)(2.0/sqrtf(vef * Pi)));
+						reply.catf(" %.03f", (double)(2.0/fastSqrtf(vef * Pi)));
 					}
 				}
 			}
